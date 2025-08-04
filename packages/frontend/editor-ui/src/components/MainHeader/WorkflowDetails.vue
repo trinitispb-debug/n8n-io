@@ -7,7 +7,6 @@ import {
 	MODAL_CONFIRM,
 	PLACEHOLDER_EMPTY_WORKFLOW_ID,
 	PROJECT_MOVE_RESOURCE_MODAL,
-	SOURCE_CONTROL_PUSH_MODAL_KEY,
 	VIEWS,
 	WORKFLOW_MENU_ACTIONS,
 	WORKFLOW_SETTINGS_MODAL_KEY,
@@ -108,7 +107,6 @@ const tagsSaving = ref(false);
 const importFileRef = ref<HTMLInputElement | undefined>();
 
 const tagsEventBus = createEventBus();
-const sourceControlModalEventBus = createEventBus();
 const changeOwnerEventBus = createEventBus();
 
 const hasChanged = (prev: string[], curr: string[]) => {
@@ -484,15 +482,15 @@ async function onWorkflowMenuSelect(value: string): Promise<void> {
 			break;
 		}
 		case WORKFLOW_MENU_ACTIONS.PUSH: {
-			canvasStore.startLoading();
 			try {
 				await onSaveButtonClick();
 
-				const status = await sourceControlStore.getAggregatedStatus();
-
-				uiStore.openModalWithData({
-					name: SOURCE_CONTROL_PUSH_MODAL_KEY,
-					data: { eventBus: sourceControlModalEventBus, status },
+				// Navigate to route with sourceControl param - modal will handle data loading and loading states
+				void router.push({
+					query: {
+						...route.query,
+						sourceControl: 'push',
+					},
 				});
 			} catch (error) {
 				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -507,8 +505,6 @@ async function onWorkflowMenuSelect(value: string): Promise<void> {
 					default:
 						toast.showError(error, locale.baseText('error'));
 				}
-			} finally {
-				canvasStore.stopLoading();
 			}
 
 			break;

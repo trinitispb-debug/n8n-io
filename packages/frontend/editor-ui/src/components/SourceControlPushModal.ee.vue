@@ -3,12 +3,11 @@ import ProjectCardBadge from '@/components/Projects/ProjectCardBadge.vue';
 import { useLoadingService } from '@/composables/useLoadingService';
 import { useTelemetry } from '@/composables/useTelemetry';
 import { useToast } from '@/composables/useToast';
-import { SOURCE_CONTROL_PUSH_MODAL_KEY, VIEWS, WORKFLOW_DIFF_MODAL_KEY } from '@/constants';
+import { SOURCE_CONTROL_PUSH_MODAL_KEY, VIEWS } from '@/constants';
 import EnvFeatureFlag from '@/features/env-feature-flag/EnvFeatureFlag.vue';
 import type { WorkflowResource } from '@/Interface';
 import { useProjectsStore } from '@/stores/projects.store';
 import { useSourceControlStore } from '@/stores/sourceControl.store';
-import { useUIStore } from '@/stores/ui.store';
 import { useUsersStore } from '@/stores/users.store';
 import type { ProjectListItem, ProjectSharingData } from '@/types/projects.types';
 import { ResourceType } from '@/utils/projects.utils';
@@ -37,29 +36,65 @@ import {
 } from '@n8n/design-system';
 import { useI18n } from '@n8n/i18n';
 import type { EventBus } from '@n8n/utils/event-bus';
-import { createEventBus } from '@n8n/utils/event-bus';
 import { refDebounced, useStorage } from '@vueuse/core';
 import dateformat from 'dateformat';
 import orderBy from 'lodash/orderBy';
 import { computed, onBeforeMount, onMounted, reactive, ref, toRaw, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller';
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
 import Modal from './Modal.vue';
 
 const props = defineProps<{
-	data: { eventBus: EventBus; status: SourceControlledFile[] };
+	data: { eventBus: EventBus; status?: SourceControlledFile[] };
 }>();
 
 const loadingService = useLoadingService();
-const uiStore = useUIStore();
 const toast = useToast();
 const i18n = useI18n();
 const sourceControlStore = useSourceControlStore();
 const projectsStore = useProjectsStore();
 const route = useRoute();
+const router = useRouter();
 const telemetry = useTelemetry();
 const usersStore = useUsersStore();
+
+// Reactive status state - starts with props data or empty, then loads fresh data
+const status = ref<SourceControlledFile[]>(props.data.status ?? []);
+const isLoading = ref(false);
+
+// Load fresh source control status when modal opens
+async function loadSourceControlStatus() {
+	if (isLoading.value) return;
+
+	isLoading.value = true;
+	loadingService.startLoading();
+	loadingService.setLoadingText(i18n.baseText('settings.sourceControl.loading.checkingForChanges'));
+
+	try {
+		const freshStatus = await sourceControlStore.getAggregatedStatus();
+
+		if (!freshStatus.length) {
+			toast.showMessage({
+				title: 'No changes to commit',
+				message: 'Everything is up to date',
+				type: 'info',
+			});
+			// Close modal since there's nothing to show
+			close();
+			return;
+		}
+
+		status.value = freshStatus;
+	} catch (error) {
+		toast.showError(error, i18n.baseText('error'));
+		close();
+	} finally {
+		loadingService.stopLoading();
+		loadingService.setLoadingText(i18n.baseText('genericHelpers.loading'));
+		isLoading.value = false;
+	}
+}
 
 const projectAdminCalloutDismissed = useStorage(
 	'SOURCE_CONTROL_PROJECT_ADMIN_CALLOUT_DISMISSED',
@@ -182,14 +217,12 @@ const workflowId = computed(
 		([VIEWS.WORKFLOW].includes(route.name as VIEWS) && route.params.name?.toString()) || undefined,
 );
 
-const changes = computed(() => classifyFilesByType(props.data.status, workflowId.value));
+const changes = computed(() => classifyFilesByType(status.value, workflowId.value));
 
 const selectedWorkflows = reactive<Set<string>>(new Set());
 
 const maybeSelectCurrentWorkflow = (workflow?: SourceControlledFileWithProject) =>
 	workflow && selectedWorkflows.add(workflow.id);
-
-onMounted(() => maybeSelectCurrentWorkflow(changes.value.currentWorkflow));
 
 const currentProject = computed(() => {
 	if (!route.params.projectId) {
@@ -347,7 +380,9 @@ function onToggleSelectAll() {
 }
 
 function close() {
-	uiStore.closeModal(SOURCE_CONTROL_PUSH_MODAL_KEY);
+	// Navigate back in history to maintain proper browser navigation
+	// The useWorkflowDiffRouting composable will handle closing the modal
+	router.back();
 }
 
 function renderUpdatedAt(file: SourceControlledFile) {
@@ -563,27 +598,41 @@ function castProject(project: ProjectListItem) {
 	return { homeProject: project } as unknown as WorkflowResource;
 }
 
-const workflowDiffEventBus = createEventBus();
-
 function openDiffModal(id: string) {
 	telemetry.track('User clicks compare workflows', {
 		workflow_id: id,
 		context: 'source_control_push',
 	});
-	uiStore.openModalWithData({
-		name: WORKFLOW_DIFF_MODAL_KEY,
-		data: { eventBus: workflowDiffEventBus, workflowId: id, direction: 'push' },
+
+	// Only update route - modal will be opened by route watcher
+	void router.push({
+		query: {
+			...route.query,
+			diff: id,
+			direction: 'push',
+		},
 	});
 }
+
+// Load data when modal opens
+onMounted(async () => {
+	// Only load fresh data if we don't have any initial data
+	if (!props.data.status || props.data.status.length === 0) {
+		await loadSourceControlStatus();
+		maybeSelectCurrentWorkflow(changes.value.currentWorkflow);
+	}
+});
 </script>
 
 <template>
 	<Modal
+		v-if="!isLoading"
 		width="812px"
 		:event-bus="data.eventBus"
 		:name="SOURCE_CONTROL_PUSH_MODAL_KEY"
 		:height="modalHeight"
 		:custom-class="$style.sourceControlPush"
+		:before-close="close"
 	>
 		<template #header>
 			<N8nHeading tag="h1" size="xlarge">

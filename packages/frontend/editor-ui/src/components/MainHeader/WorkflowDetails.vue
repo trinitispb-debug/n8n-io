@@ -21,6 +21,7 @@ import WorkflowTagsDropdown from '@/components/WorkflowTagsDropdown.vue';
 import BreakpointsObserver from '@/components/BreakpointsObserver.vue';
 import WorkflowHistoryButton from '@/components/MainHeader/WorkflowHistoryButton.vue';
 import CollaborationPane from '@/components/MainHeader/CollaborationPane.vue';
+import WorkflowSuggestedActions from '@/components/WorkflowSuggestedActions.vue';
 import { ResourceType } from '@/utils/projects.utils';
 
 import { useProjectsStore } from '@/stores/projects.store';
@@ -774,6 +775,7 @@ const onBreadcrumbsItemSelected = (item: PathItem) => {
 		</span>
 
 		<PushConnectionTracker class="actions">
+			<WorkflowSuggestedActions v-if="!isNewWorkflow" :workflow="workflowsStore.workflow" />
 			<span :class="`activator ${$style.group}`">
 				<WorkflowActivator
 					:is-archived="isArchived"
@@ -939,6 +941,26 @@ $--header-spacing: 20px;
 		:deep(input) {
 			min-width: 180px;
 		}
+	}
+}
+
+@media (max-width: 1390px) {
+	.name-container {
+		margin-right: var(--spacing-xs);
+	}
+
+	.actions {
+		gap: var(--spacing-xs);
+	}
+}
+
+@media (max-width: 1350px) {
+	.name-container {
+		margin-right: var(--spacing-2xs);
+	}
+
+	.actions {
+		gap: var(--spacing-2xs);
 	}
 }
 </style>

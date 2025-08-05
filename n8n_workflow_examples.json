@@ -1,0 +1,736 @@
+{
+  "workflows": [
+    {
+      "name": "Inventory Reserve Main Workflow",
+      "description": "Основной workflow для резервирования товаров",
+      "nodes": [
+        {
+          "name": "Webhook",
+          "type": "n8n-nodes-base.webhook",
+          "position": [240, 300],
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "inventory-reserve",
+            "responseMode": "responseNode",
+            "options": {}
+          }
+        },
+        {
+          "name": "Set Variables",
+          "type": "n8n-nodes-base.set",
+          "position": [460, 300],
+          "parameters": {
+            "values": {
+              "string": [
+                {
+                  "name": "product_id",
+                  "value": "={{ $json.product_id }}"
+                },
+                {
+                  "name": "quantity",
+                  "value": "={{ $json.quantity }}"
+                },
+                {
+                  "name": "customer_id", 
+                  "value": "={{ $json.customer_id }}"
+                },
+                {
+                  "name": "request_id",
+                  "value": "={{ $now.toUnixInteger() }}_{{ $json.product_id }}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Check Stock Bitrix24",
+          "type": "n8n-nodes-base.httpRequest",
+          "position": [680, 300],
+          "parameters": {
+            "method": "POST",
+            "url": "https://your-bitrix24.bitrix24.ru/rest/1/webhook_key/catalog.product.get",
+            "sendBody": true,
+            "bodyParameters": {
+              "parameters": [
+                {
+                  "name": "id",
+                  "value": "={{ $json.product_id }}"
+                }
+              ]
+            },
+            "options": {}
+          }
+        },
+        {
+          "name": "Validate Stock",
+          "type": "n8n-nodes-base.code",
+          "position": [900, 300],
+          "parameters": {
+            "code": "const requestedQty = parseInt($json.quantity);\nconst currentStock = parseInt($json.result.QUANTITY);\n\nif (currentStock < requestedQty) {\n  return [{\n    json: {\n      status: 'error',\n      error_type: 'insufficient_stock',\n      message: `Недостаточно товара. Доступно: ${currentStock}, запрошено: ${requestedQty}`,\n      product_id: $json.product_id,\n      available_quantity: currentStock,\n      requested_quantity: requestedQty\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    status: 'success',\n    product_id: $json.product_id,\n    product_name: $json.result.NAME,\n    reserved_quantity: requestedQty,\n    remaining_stock: currentStock - requestedQty,\n    new_quantity: currentStock - requestedQty\n  }\n}];"
+          }
+        },
+        {
+          "name": "Stock Check",
+          "type": "n8n-nodes-base.if",
+          "position": [1120, 300],
+          "parameters": {
+            "conditions": {
+              "string": [
+                {
+                  "value1": "={{ $json.status }}",
+                  "operation": "equal",
+                  "value2": "success"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Stock",
+          "type": "n8n-nodes-base.httpRequest",
+          "position": [1340, 200],
+          "parameters": {
+            "method": "POST",
+            "url": "https://your-bitrix24.bitrix24.ru/rest/1/webhook_key/catalog.product.update",
+            "sendBody": true,
+            "bodyParameters": {
+              "parameters": [
+                {
+                  "name": "id",
+                  "value": "={{ $json.product_id }}"
+                },
+                {
+                  "name": "fields",
+                  "value": "={{ {\"QUANTITY\": $json.new_quantity} }}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Deal",
+          "type": "n8n-nodes-base.httpRequest", 
+          "position": [1560, 200],
+          "parameters": {
+            "method": "POST",
+            "url": "https://your-bitrix24.bitrix24.ru/rest/1/webhook_key/crm.deal.add",
+            "sendBody": true,
+            "bodyParameters": {
+              "parameters": [
+                {
+                  "name": "fields",
+                  "value": "={{ {\"TITLE\": `Резерв товара #${$json.product_id}`, \"STAGE_ID\": \"NEW\", \"CONTACT_ID\": $json.customer_id, \"UF_CRM_DEAL_RESERVED_QTY\": $json.reserved_quantity, \"UF_CRM_DEAL_PRODUCT_ID\": $json.product_id} }}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Log Success",
+          "type": "n8n-nodes-base.googleSheets",
+          "position": [1780, 200],
+          "parameters": {
+            "operation": "append",
+            "sheetId": "your-sheet-id",
+            "range": "Лог операций",
+            "values": {
+              "values": [
+                [
+                  "={{ $now }}",
+                  "reserve",
+                  "={{ $json.product_id }}",
+                  "={{ $json.reserved_quantity }}",
+                  "success",
+                  "Товар успешно зарезервирован",
+                  "={{ $json.customer_id }}"
+                ]
+              ]
+            }
+          }
+        },
+        {
+          "name": "Success Notification",
+          "type": "n8n-nodes-base.telegram",
+          "position": [2000, 200],
+          "parameters": {
+            "chatId": "your-chat-id",
+            "text": "✅ *Резервирование успешно*\n\n📦 Товар: {{ $json.product_name }}\n📊 Количество: {{ $json.reserved_quantity }}\n👤 Клиент: {{ $json.customer_id }}\n📅 Дата: {{ $now.format('DD.MM.YYYY HH:mm') }}",
+            "parseMode": "Markdown"
+          }
+        },
+        {
+          "name": "Success Response",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "position": [2220, 200],
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={{ {\"status\": \"success\", \"message\": \"Товар успешно зарезервирован\", \"reserved_quantity\": $json.reserved_quantity, \"request_id\": $json.request_id} }}"
+          }
+        },
+        {
+          "name": "Log Error",
+          "type": "n8n-nodes-base.googleSheets",
+          "position": [1340, 400],
+          "parameters": {
+            "operation": "append",
+            "sheetId": "your-sheet-id", 
+            "range": "Лог операций",
+            "values": {
+              "values": [
+                [
+                  "={{ $now }}",
+                  "reserve_error",
+                  "={{ $json.product_id }}",
+                  "={{ $json.requested_quantity }}",
+                  "error",
+                  "={{ $json.message }}",
+                  "={{ $json.customer_id }}"
+                ]
+              ]
+            }
+          }
+        },
+        {
+          "name": "Error Notification",
+          "type": "n8n-nodes-base.telegram",
+          "position": [1560, 400],
+          "parameters": {
+            "chatId": "your-chat-id",
+            "text": "❌ *Ошибка резервирования*\n\n📦 Товар ID: {{ $json.product_id }}\n📊 Запрошено: {{ $json.requested_quantity }}\n📈 Доступно: {{ $json.available_quantity }}\n❗ Ошибка: {{ $json.message }}",
+            "parseMode": "Markdown"
+          }
+        },
+        {
+          "name": "Error Response",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "position": [1780, 400],
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={{ {\"status\": \"error\", \"error_type\": $json.error_type, \"message\": $json.message, \"available_quantity\": $json.available_quantity} }}"
+          }
+        }
+      ],
+      "connections": {
+        "Webhook": {
+          "main": [
+            [
+              {
+                "node": "Set Variables",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Set Variables": {
+          "main": [
+            [
+              {
+                "node": "Check Stock Bitrix24",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Check Stock Bitrix24": {
+          "main": [
+            [
+              {
+                "node": "Validate Stock",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Validate Stock": {
+          "main": [
+            [
+              {
+                "node": "Stock Check",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Stock Check": {
+          "main": [
+            [
+              {
+                "node": "Update Stock",
+                "type": "main",
+                "index": 0
+              }
+            ],
+            [
+              {
+                "node": "Log Error",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Update Stock": {
+          "main": [
+            [
+              {
+                "node": "Create Deal",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Create Deal": {
+          "main": [
+            [
+              {
+                "node": "Log Success",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Log Success": {
+          "main": [
+            [
+              {
+                "node": "Success Notification",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Success Notification": {
+          "main": [
+            [
+              {
+                "node": "Success Response",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Log Error": {
+          "main": [
+            [
+              {
+                "node": "Error Notification",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Error Notification": {
+          "main": [
+            [
+              {
+                "node": "Error Response",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "Error Handler Workflow",
+      "description": "Workflow для обработки ошибок системы резервирования",
+      "nodes": [
+        {
+          "name": "Error Trigger",
+          "type": "n8n-nodes-base.errorTrigger",
+          "position": [240, 300],
+          "parameters": {}
+        },
+        {
+          "name": "Analyze Error",
+          "type": "n8n-nodes-base.code",
+          "position": [460, 300],
+          "parameters": {
+            "code": "const error = $json.error;\nconst errorType = error.name || 'UnknownError';\nconst errorMessage = error.message || 'Неизвестная ошибка';\nconst workflowName = $workflow.name;\nconst executionId = $execution.id;\n\nlet severity = 'medium';\nlet notificationChannel = ['telegram'];\n\n// Определяем серьезность ошибки\nif (errorType.includes('API') || errorType.includes('HTTP')) {\n  severity = 'high';\n  notificationChannel = ['telegram', 'email'];\n} else if (errorType.includes('Validation')) {\n  severity = 'low';\n  notificationChannel = ['telegram'];\n}\n\nreturn [{\n  json: {\n    error_type: errorType,\n    error_message: errorMessage,\n    severity: severity,\n    workflow_name: workflowName,\n    execution_id: executionId,\n    timestamp: new Date().toISOString(),\n    notification_channels: notificationChannel\n  }\n}];"
+          }
+        },
+        {
+          "name": "Log Error to Sheets",
+          "type": "n8n-nodes-base.googleSheets",
+          "position": [680, 300],
+          "parameters": {
+            "operation": "append",
+            "sheetId": "your-error-log-sheet-id",
+            "range": "Ошибки",
+            "values": {
+              "values": [
+                [
+                  "={{ $json.timestamp }}",
+                  "={{ $json.workflow_name }}",
+                  "={{ $json.error_type }}",
+                  "={{ $json.error_message }}",
+                  "={{ $json.severity }}",
+                  "={{ $json.execution_id }}"
+                ]
+              ]
+            }
+          }
+        },
+        {
+          "name": "Check Severity",
+          "type": "n8n-nodes-base.switch",
+          "position": [900, 300],
+          "parameters": {
+            "values": [
+              {
+                "conditions": [
+                  {
+                    "value1": "={{ $json.severity }}",
+                    "operation": "equal",
+                    "value2": "high"
+                  }
+                ],
+                "output": 0
+              },
+              {
+                "conditions": [
+                  {
+                    "value1": "={{ $json.severity }}",
+                    "operation": "equal", 
+                    "value2": "medium"
+                  }
+                ],
+                "output": 1
+              }
+            ],
+            "fallbackOutput": 2
+          }
+        },
+        {
+          "name": "High Priority Notification",
+          "type": "n8n-nodes-base.telegram",
+          "position": [1120, 200],
+          "parameters": {
+            "chatId": "your-admin-chat-id",
+            "text": "🚨 *КРИТИЧЕСКАЯ ОШИБКА*\n\n🔧 Workflow: {{ $json.workflow_name }}\n❌ Тип: {{ $json.error_type }}\n📝 Сообщение: {{ $json.error_message }}\n⏰ Время: {{ $json.timestamp }}\n🆔 Execution: {{ $json.execution_id }}\n\n⚠️ Требуется немедленное вмешательство!",
+            "parseMode": "Markdown"
+          }
+        },
+        {
+          "name": "Medium Priority Notification",
+          "type": "n8n-nodes-base.telegram",
+          "position": [1120, 300],
+          "parameters": {
+            "chatId": "your-team-chat-id",
+            "text": "⚠️ *Ошибка в системе*\n\n🔧 Workflow: {{ $json.workflow_name }}\n❌ Тип: {{ $json.error_type }}\n📝 Сообщение: {{ $json.error_message }}\n⏰ Время: {{ $json.timestamp }}",
+            "parseMode": "Markdown"
+          }
+        },
+        {
+          "name": "Low Priority Log",
+          "type": "n8n-nodes-base.noOp",
+          "position": [1120, 400],
+          "parameters": {}
+        },
+        {
+          "name": "Send Email Alert",
+          "type": "n8n-nodes-base.emailSend",
+          "position": [1340, 200],
+          "parameters": {
+            "fromEmail": "alerts@company.com",
+            "toEmail": "admin@company.com",
+            "subject": "🚨 Критическая ошибка в системе резервирования",
+            "text": "Обнаружена критическая ошибка в системе резервирования товаров.\n\nДетали:\nWorkflow: {{ $json.workflow_name }}\nТип ошибки: {{ $json.error_type }}\nСообщение: {{ $json.error_message }}\nВремя: {{ $json.timestamp }}\nExecution ID: {{ $json.execution_id }}\n\nТребуется немедленная проверка системы."
+          }
+        }
+      ],
+      "connections": {
+        "Error Trigger": {
+          "main": [
+            [
+              {
+                "node": "Analyze Error",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Analyze Error": {
+          "main": [
+            [
+              {
+                "node": "Log Error to Sheets",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Log Error to Sheets": {
+          "main": [
+            [
+              {
+                "node": "Check Severity",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Check Severity": {
+          "main": [
+            [
+              {
+                "node": "High Priority Notification",
+                "type": "main",
+                "index": 0
+              }
+            ],
+            [
+              {
+                "node": "Medium Priority Notification",
+                "type": "main",
+                "index": 0
+              }
+            ],
+            [
+              {
+                "node": "Low Priority Log",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "High Priority Notification": {
+          "main": [
+            [
+              {
+                "node": "Send Email Alert",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "Scheduled Stock Sync",
+      "description": "Периодическая синхронизация остатков с Битрикс24",
+      "nodes": [
+        {
+          "name": "Schedule Trigger",
+          "type": "n8n-nodes-base.cron",
+          "position": [240, 300],
+          "parameters": {
+            "rule": {
+              "interval": [
+                {
+                  "field": "cronExpression",
+                  "expression": "0 */15 8-18 * * 1-5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Products List",
+          "type": "n8n-nodes-base.httpRequest",
+          "position": [460, 300],
+          "parameters": {
+            "method": "POST",
+            "url": "https://your-bitrix24.bitrix24.ru/rest/1/webhook_key/catalog.product.list",
+            "sendBody": true,
+            "bodyParameters": {
+              "parameters": [
+                {
+                  "name": "filter",
+                  "value": "={{ {\"ACTIVE\": \"Y\"} }}"
+                },
+                {
+                  "name": "select",
+                  "value": "={{ [\"ID\", \"NAME\", \"QUANTITY\", \"MEASURE\"] }}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Process Products",
+          "type": "n8n-nodes-base.code",
+          "position": [680, 300],
+          "parameters": {
+            "code": "const products = $json.result;\nconst processedProducts = [];\n\nfor (const product of products) {\n  // Проверяем критически низкие остатки\n  const quantity = parseInt(product.QUANTITY);\n  let status = 'normal';\n  let alert = false;\n  \n  if (quantity === 0) {\n    status = 'out_of_stock';\n    alert = true;\n  } else if (quantity <= 10) {\n    status = 'low_stock';\n    alert = true;\n  }\n  \n  processedProducts.push({\n    json: {\n      product_id: product.ID,\n      product_name: product.NAME,\n      quantity: quantity,\n      status: status,\n      alert: alert,\n      timestamp: new Date().toISOString()\n    }\n  });\n}\n\nreturn processedProducts;"
+          }
+        },
+        {
+          "name": "Update Stock Cache",
+          "type": "n8n-nodes-base.googleSheets",
+          "position": [900, 300],
+          "parameters": {
+            "operation": "clear",
+            "sheetId": "your-stock-cache-sheet-id",
+            "range": "Остатки!A2:Z"
+          }
+        },
+        {
+          "name": "Write Stock Data",
+          "type": "n8n-nodes-base.googleSheets",
+          "position": [1120, 300],
+          "parameters": {
+            "operation": "append",
+            "sheetId": "your-stock-cache-sheet-id",
+            "range": "Остатки",
+            "values": {
+              "values": "={{ $json.map(item => [item.json.product_id, item.json.product_name, item.json.quantity, item.json.status, item.json.timestamp]) }}"
+            }
+          }
+        },
+        {
+          "name": "Filter Alerts",
+          "type": "n8n-nodes-base.if",
+          "position": [1340, 300],
+          "parameters": {
+            "conditions": {
+              "boolean": [
+                {
+                  "value1": "={{ $json.alert }}",
+                  "value2": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Send Low Stock Alert",
+          "type": "n8n-nodes-base.telegram",
+          "position": [1560, 200],
+          "parameters": {
+            "chatId": "your-inventory-chat-id",
+            "text": "⚠️ *Низкие остатки товара*\n\n📦 Товар: {{ $json.product_name }}\n📊 Остаток: {{ $json.quantity }} шт.\n🚨 Статус: {{ $json.status === 'out_of_stock' ? 'Товар закончился' : 'Низкий остаток' }}\n⏰ Время проверки: {{ $json.timestamp }}\n\n{{ $json.status === 'out_of_stock' ? '❌ Требуется срочное пополнение!' : '⚠️ Рекомендуется пополнить запас' }}",
+            "parseMode": "Markdown"
+          }
+        }
+      ],
+      "connections": {
+        "Schedule Trigger": {
+          "main": [
+            [
+              {
+                "node": "Get Products List",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Get Products List": {
+          "main": [
+            [
+              {
+                "node": "Process Products",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Process Products": {
+          "main": [
+            [
+              {
+                "node": "Update Stock Cache",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Update Stock Cache": {
+          "main": [
+            [
+              {
+                "node": "Write Stock Data",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Write Stock Data": {
+          "main": [
+            [
+              {
+                "node": "Filter Alerts",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Filter Alerts": {
+          "main": [
+            [
+              {
+                "node": "Send Low Stock Alert",
+                "type": "main",
+                "index": 0
+              }
+            ],
+            []
+          ]
+        }
+      }
+    }
+  ],
+  "setup_instructions": {
+    "prerequisites": [
+      "Установленный n8n (self-hosted или cloud)",
+      "Доступ к API Битрикс24 с правами на catalog и crm",
+      "Google Sheets API credentials",
+      "Telegram Bot Token (опционально)",
+      "SMTP настройки для email (опционально)"
+    ],
+    "configuration_steps": [
+      {
+        "step": 1,
+        "title": "Настройка Битрикс24",
+        "description": "Создайте входящий webhook в Битрикс24 с правами на catalog.product.*, crm.deal.*, tasks.task.*"
+      },
+      {
+        "step": 2,
+        "title": "Настройка Google Sheets",
+        "description": "Создайте Google Sheets документ с листами 'Лог операций', 'Ошибки', 'Остатки'"
+      },
+      {
+        "step": 3,
+        "title": "Импорт workflow",
+        "description": "Импортируйте JSON workflow в n8n и замените placeholder значения на реальные"
+      },
+      {
+        "step": 4,
+        "title": "Настройка credentials",
+        "description": "Добавьте credentials для Google Sheets, Telegram, Email в n8n"
+      },
+      {
+        "step": 5,
+        "title": "Тестирование",
+        "description": "Протестируйте каждый workflow с тестовыми данными"
+      }
+    ],
+    "required_replacements": [
+      "your-bitrix24.bitrix24.ru - замените на ваш домен Битрикс24",
+      "webhook_key - замените на ваш webhook ключ",
+      "your-sheet-id - замените на ID ваших Google Sheets",
+      "your-chat-id - замените на ID Telegram чатов",
+      "admin@company.com - замените на email администратора"
+    ]
+  }
+}

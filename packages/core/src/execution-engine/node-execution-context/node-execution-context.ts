@@ -30,12 +30,14 @@ import {
 	ExpressionError,
 	NodeHelpers,
 	NodeOperationError,
+	UnexpectedError,
 } from 'n8n-workflow';
 
 import {
 	HTTP_REQUEST_AS_TOOL_NODE_TYPE,
 	HTTP_REQUEST_NODE_TYPE,
 	HTTP_REQUEST_TOOL_NODE_TYPE,
+	WAITING_TOKEN_QUERY_PARAM,
 } from '@/constants';
 import { InstanceSettings } from '@/instance-settings';
 
@@ -43,6 +45,7 @@ import { cleanupParameterData } from './utils/cleanup-parameter-data';
 import { ensureType } from './utils/ensure-type';
 import { extractValue } from './utils/extract-value';
 import { getAdditionalKeys } from './utils/get-additional-keys';
+import { generateSignatureToken } from './utils/signature-helpers';
 import { validateValueAgainstSchema } from './utils/validate-value-against-schema';
 
 export abstract class NodeExecutionContext implements Omit<FunctionsBase, 'getCredentials'> {
@@ -198,6 +201,33 @@ export abstract class NodeExecutionContext implements Omit<FunctionsBase, 'getCr
 
 	getInstanceId() {
 		return this.instanceSettings.instanceId;
+	}
+
+	setSignatureValidationRequired() {
+		if (this.runExecutionData) this.runExecutionData.validateSignature = true;
+	}
+
+	getSignedResumeUrl(parameters: Record<string, string> = {}) {
+		const { webhookWaitingBaseUrl, executionId } = this.additionalData;
+
+		if (typeof executionId !== 'string') {
+			throw new UnexpectedError('Execution id is missing');
+		}
+
+		const baseURL = new URL(`${webhookWaitingBaseUrl}/${executionId}/${this.node.id}`);
+
+		for (const [key, value] of Object.entries(parameters)) {
+			baseURL.searchParams.set(key, value);
+		}
+
+		const token = generateSignatureToken(
+			baseURL.toString(),
+			this.instanceSettings.hmacSignatureSecret,
+		);
+
+		baseURL.searchParams.set(WAITING_TOKEN_QUERY_PARAM, token);
+
+		return baseURL.toString();
 	}
 
 	getTimezone() {

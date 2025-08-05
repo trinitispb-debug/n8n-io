@@ -881,6 +881,10 @@ export interface FunctionsBase {
 	getRestApiUrl(): string;
 	getInstanceBaseUrl(): string;
 	getInstanceId(): string;
+	/** Get the waiting resume url signed with the signature token */
+	getSignedResumeUrl(parameters?: Record<string, string>): string;
+	/** Set requirement in the execution for signature token validation */
+	setSignatureValidationRequired(): void;
 	getChildNodes(
 		nodeName: string,
 		options?: { includeNodeParameters?: boolean },
@@ -1140,6 +1144,8 @@ export interface IWebhookFunctions extends FunctionsBaseWithRequiredKeys<'getMod
 	getWebhookName(): string;
 	nodeHelpers: NodeHelperFunctions;
 	helpers: RequestHelperFunctions & BaseHelperFunctions & BinaryHelperFunctions;
+	/** Validate the signature token in the request */
+	validateExecutionWaitingToken(): boolean;
 }
 
 export interface INodeCredentialsDetails {
@@ -2248,6 +2254,11 @@ export interface IRunExecutionData {
 		waitingExecutionSource: IWaitingForExecutionSource | null;
 	};
 	parentExecution?: RelatedExecution;
+	/**
+	 * This is used to prevent breaking change
+	 * for waiting executions started before signature validation was added
+	 */
+	validateSignature?: boolean;
 	waitTill?: Date;
 	pushRef?: string;
 

@@ -1,0 +1,226 @@
+{
+  "name": "Inventory Reserve Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inventory-reserve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "product_id",
+              "value": "={{ $json.product_id }}"
+            },
+            {
+              "name": "quantity",
+              "value": "={{ $json.quantity }}"
+            },
+            {
+              "name": "customer_id",
+              "value": "={{ $json.customer_id }}"
+            },
+            {
+              "name": "request_id",
+              "value": "={{ $now.toUnixInteger() }}_{{ $json.product_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-bitrix24.bitrix24.ru/rest/1/webhook_key/catalog.product.get",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"id\": \"{{ $json.product_id }}\" }",
+        "options": {}
+      },
+      "name": "Check Stock Bitrix24",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const requestedQty = parseInt($input.first().json.quantity);\nconst currentStock = parseInt($input.first().json.result?.QUANTITY || 0);\nconst productId = $input.first().json.product_id;\nconst productName = $input.first().json.result?.NAME || 'Unknown Product';\n\nif (currentStock < requestedQty) {\n  return [{\n    json: {\n      status: 'error',\n      error_type: 'insufficient_stock',\n      message: `Недостаточно товара. Доступно: ${currentStock}, запрошено: ${requestedQty}`,\n      product_id: productId,\n      product_name: productName,\n      available_quantity: currentStock,\n      requested_quantity: requestedQty\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    status: 'success',\n    product_id: productId,\n    product_name: productName,\n    reserved_quantity: requestedQty,\n    remaining_stock: currentStock - requestedQty,\n    new_quantity: currentStock - requestedQty,\n    customer_id: $input.first().json.customer_id\n  }\n}];"
+      },
+      "name": "Validate Stock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "success"
+            }
+          ]
+        }
+      },
+      "name": "Stock Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-bitrix24.bitrix24.ru/rest/1/webhook_key/catalog.product.update",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"id\": \"{{ $json.product_id }}\", \"fields\": { \"QUANTITY\": \"{{ $json.new_quantity }}\" } }",
+        "options": {}
+      },
+      "name": "Update Stock",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-bitrix24.bitrix24.ru/rest/1/webhook_key/crm.deal.add",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"fields\": { \"TITLE\": \"Резерв товара #{{ $json.product_id }}\", \"STAGE_ID\": \"NEW\", \"CONTACT_ID\": \"{{ $json.customer_id }}\", \"COMMENTS\": \"Товар: {{ $json.product_name }}\\nКоличество: {{ $json.reserved_quantity }}\" } }",
+        "options": {}
+      },
+      "name": "Create Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"success\",\n  \"message\": \"Товар успешно зарезервирован\",\n  \"product_id\": $json.product_id,\n  \"product_name\": $json.product_name,\n  \"reserved_quantity\": $json.reserved_quantity,\n  \"remaining_stock\": $json.remaining_stock,\n  \"request_id\": $json.request_id\n} }}"
+      },
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"error\",\n  \"error_type\": $json.error_type,\n  \"message\": $json.message,\n  \"product_id\": $json.product_id,\n  \"available_quantity\": $json.available_quantity,\n  \"requested_quantity\": $json.requested_quantity\n} }}"
+      },
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1340, 400]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "Check Stock Bitrix24",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Stock Bitrix24": {
+      "main": [
+        [
+          {
+            "node": "Validate Stock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Stock": {
+      "main": [
+        [
+          {
+            "node": "Stock Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stock Check": {
+      "main": [
+        [
+          {
+            "node": "Update Stock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Stock": {
+      "main": [
+        [
+          {
+            "node": "Create Deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Deal": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {},
+  "staticData": {},
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-01T00:00:00.000Z"
+}

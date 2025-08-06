@@ -17,17 +17,19 @@
         "updates": [
           "message",
           "callback_query"
-        ]
+        ],
+        "additionalFields": {
+          "download_attachments": false
+        }
       },
       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
-      "typeVersion": 1,
+      "typeVersion": 1.1,
       "position": [
         460,
         300
-      ],
-      "webhookId": "telegram-bot-webhook"
+      ]
     },
     {
       "parameters": {

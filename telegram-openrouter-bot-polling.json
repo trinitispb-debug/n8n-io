@@ -1,0 +1,815 @@
+{
+  "name": "Telegram OpenRouter AI Bot (Polling)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/getUpdates",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "offset",
+              "value": "={{ $workflow.lastOffset || 0 }}"
+            },
+            {
+              "name": "timeout",
+              "value": "1"
+            },
+            {
+              "name": "allowed_updates",
+              "value": "=[\"message\", \"callback_query\"]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-updates",
+      "name": "Get Telegram Updates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Обрабатываем полученные обновления от Telegram\nconst response = $input.first().json;\n\nif (!response.ok || !response.result || response.result.length === 0) {\n  return [];\n}\n\nconst updates = response.result;\nconst processedUpdates = [];\n\nfor (const update of updates) {\n  // Обновляем offset для следующего запроса\n  $workflow.lastOffset = update.update_id + 1;\n  \n  // Преобразуем формат обновления для совместимости с Telegram Trigger\n  if (update.message) {\n    processedUpdates.push({\n      update_id: update.update_id,\n      message: update.message\n    });\n  } else if (update.callback_query) {\n    processedUpdates.push({\n      update_id: update.update_id,\n      callback_query: update.callback_query\n    });\n  }\n}\n\nreturn processedUpdates;"
+      },
+      "id": "process-updates",
+      "name": "Process Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.message?.text }}",
+              "rightValue": "/start",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-start-command",
+      "name": "Is Start Command",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.message.chat.id }}"
+            },
+            {
+              "name": "text",
+              "value": "🤖 Добро пожаловать в AI Assistant Bot!\\n\\nВыберите модель нейросети:"
+            },
+            {
+              "name": "reply_markup",
+              "value": "={\"inline_keyboard\": [[{\"text\": \"🚀 GPT-4 Turbo\", \"callback_data\": \"model_openai/gpt-4-turbo\"}, {\"text\": \"⚡ GPT-3.5 Turbo\", \"callback_data\": \"model_openai/gpt-3.5-turbo\"}], [{\"text\": \"🎯 Claude 3.5 Sonnet\", \"callback_data\": \"model_anthropic/claude-3.5-sonnet\"}, {\"text\": \"🧠 Claude 3 Haiku\", \"callback_data\": \"model_anthropic/claude-3-haiku\"}], [{\"text\": \"🔥 Llama 3.1 70B\", \"callback_data\": \"model_meta-llama/llama-3.1-70b-instruct\"}, {\"text\": \"💎 Gemini Pro\", \"callback_data\": \"model_google/gemini-pro\"}], [{\"text\": \"🎨 DALL-E 3\", \"callback_data\": \"model_openai/dall-e-3\"}, {\"text\": \"🖼️ Stable Diffusion\", \"callback_data\": \"model_stability-ai/stable-diffusion-xl\"}], [{\"text\": \"📊 Показать все модели\", \"callback_data\": \"show_all_models\"}]]}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-welcome",
+      "name": "Send Welcome Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.callback_query?.data }}",
+              "rightValue": "model_",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-model-selection",
+      "name": "Is Model Selection",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Обрабатываем выбор модели\nconst callbackData = $input.first().json.callback_query.data;\nconst modelName = callbackData.replace('model_', '');\nconst userId = $input.first().json.callback_query.from.id;\nconst chatId = $input.first().json.callback_query.message.chat.id;\n\n// Словарь моделей с описаниями\nconst modelDescriptions = {\n  'openai/gpt-4-turbo': '🚀 GPT-4 Turbo - самая мощная модель OpenAI',\n  'openai/gpt-3.5-turbo': '⚡ GPT-3.5 Turbo - быстрая и эффективная модель',\n  'anthropic/claude-3.5-sonnet': '🎯 Claude 3.5 Sonnet - превосходная модель для анализа',\n  'anthropic/claude-3-haiku': '🧠 Claude 3 Haiku - быстрая модель Anthropic',\n  'meta-llama/llama-3.1-70b-instruct': '🔥 Llama 3.1 70B - мощная open-source модель',\n  'google/gemini-pro': '💎 Gemini Pro - продвинутая модель Google',\n  'openai/dall-e-3': '🎨 DALL-E 3 - генерация изображений от OpenAI',\n  'stability-ai/stable-diffusion-xl': '🖼️ Stable Diffusion XL - open-source генерация изображений'\n};\n\n// Сохраняем выбранную модель (в реальности здесь должна быть база данных)\n$workflow.userModels = $workflow.userModels || {};\n$workflow.userModels[userId] = modelName;\n\nreturn {\n  userId: userId,\n  chatId: chatId,\n  selectedModel: modelName,\n  modelDescription: modelDescriptions[modelName] || modelName,\n  callbackQueryId: $input.first().json.callback_query.id\n};"
+      },
+      "id": "process-model-selection",
+      "name": "Process Model Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/answerCallbackQuery",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "callback_query_id",
+              "value": "={{ $json.callbackQueryId }}"
+            },
+            {
+              "name": "text",
+              "value": "✅ Модель выбрана!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "answer-callback",
+      "name": "Answer Callback Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        150
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.modelDescription }}\\n\\n💬 Теперь отправьте ваш вопрос или запрос, и я обработаю его с помощью выбранной модели!\\n\\n📝 Для смены модели отправьте /start"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-model-confirmation",
+      "name": "Send Model Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        250
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.callback_query?.data }}",
+              "rightValue": "show_all_models",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-show-all-models",
+      "name": "Is Show All Models",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/answerCallbackQuery",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "callback_query_id",
+              "value": "={{ $json.callback_query.id }}"
+            },
+            {
+              "name": "text",
+              "value": "📋 Загружаю список моделей..."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "answer-show-models-callback",
+      "name": "Answer Show Models Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        350
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.callback_query.message.chat.id }}"
+            },
+            {
+              "name": "text",
+              "value": "🤖 **Доступные модели OpenRouter:**\\n\\n**💬 Текстовые модели:**\\n🚀 GPT-4 Turbo - Самая мощная модель OpenAI\\n⚡ GPT-3.5 Turbo - Быстрая и эффективная\\n🎯 Claude 3.5 Sonnet - Превосходный анализ\\n🧠 Claude 3 Haiku - Быстрая модель Anthropic\\n🔥 Llama 3.1 70B - Мощная open-source\\n💎 Gemini Pro - Продвинутая модель Google\\n🦙 Mixtral 8x7B - Эффективная модель Mistral\\n🌟 Command R+ - Модель Cohere\\n\\n**🎨 Генерация изображений:**\\n🎨 DALL-E 3 - От OpenAI\\n🖼️ Stable Diffusion XL - Open-source\\n🎭 Midjourney - Художественная генерация\\n\\n**🔧 Специализированные:**\\n📝 Code Llama - Для программирования\\n🔬 Perplexity - Для исследований\\n📊 Claude Instant - Быстрый анализ\\n\\n💡 Для выбора модели используйте /start"
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-all-models-list",
+      "name": "Send All Models List",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.message?.text }}",
+              "rightValue": "/",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-not-command",
+      "name": "Is Not Command",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Подготавливаем запрос к AI\nconst userMessage = $input.first().json.message.text;\nconst userId = $input.first().json.message.from.id;\nconst chatId = $input.first().json.message.chat.id;\n\n// Получаем сохраненную модель пользователя\nconst userModels = $workflow.userModels || {};\nconst selectedModel = userModels[userId] || 'openai/gpt-3.5-turbo';\n\nreturn {\n  userMessage: userMessage,\n  userId: userId,\n  chatId: chatId,\n  selectedModel: selectedModel\n};"
+      },
+      "id": "prepare-ai-request",
+      "name": "Prepare AI Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "🤔 Обрабатываю ваш запрос с помощью {{ $json.selectedModel }}..."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-processing-message",
+      "name": "Send Processing Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openrouter.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "HTTP-Referer",
+              "value": "https://your-site.com"
+            },
+            {
+              "name": "X-Title",
+              "value": "Telegram AI Bot"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "={{ $json.selectedModel }}"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"{{ $json.userMessage }}\"}]"
+            },
+            {
+              "name": "max_tokens",
+              "value": "=2000"
+            },
+            {
+              "name": "temperature",
+              "value": "=0.7"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "openrouter-api-request",
+      "name": "OpenRouter API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Обрабатываем ответ от OpenRouter API\nconst response = $input.first().json;\nconst chatId = $('Prepare AI Request').first().json.chatId;\nconst selectedModel = $('Prepare AI Request').first().json.selectedModel;\n\nlet aiResponse = '';\nlet errorMessage = '';\n\ntry {\n  if (response.choices && response.choices.length > 0) {\n    aiResponse = response.choices[0].message.content;\n  } else if (response.error) {\n    errorMessage = `❌ Ошибка API: ${response.error.message}`;\n  } else {\n    errorMessage = '❌ Неожиданный формат ответа от API';\n  }\n} catch (error) {\n  errorMessage = `❌ Ошибка обработки ответа: ${error.message}`;\n}\n\nreturn {\n  chatId: chatId,\n  aiResponse: aiResponse,\n  errorMessage: errorMessage,\n  selectedModel: selectedModel,\n  hasError: !!errorMessage\n};"
+      },
+      "id": "process-ai-response",
+      "name": "Process AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.hasError }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "has-error",
+      "name": "Has Error",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.errorMessage }}\\n\\n🔄 Попробуйте еще раз или выберите другую модель с помощью /start"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-error-message",
+      "name": "Send Error Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2220,
+        350
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegram.accessToken }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "🤖 **{{ $json.selectedModel }}:**\\n\\n{{ $json.aiResponse }}\\n\\n---\\n💡 Отправьте еще один вопрос или используйте /start для смены модели"
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-ai-response",
+      "name": "Send AI Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2220,
+        550
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot Credentials"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Telegram Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Telegram Updates": {
+      "main": [
+        [
+          {
+            "node": "Process Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Updates": {
+      "main": [
+        [
+          {
+            "node": "Is Start Command",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Model Selection",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Show All Models",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Not Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Start Command": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Model Selection": {
+      "main": [
+        [
+          {
+            "node": "Process Model Selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Model Selection": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback Query",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Model Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Show All Models": {
+      "main": [
+        [
+          {
+            "node": "Answer Show Models Callback",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send All Models List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Not Command": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepare AI Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Request": {
+      "main": [
+        [
+          {
+            "node": "Send Processing Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenRouter API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter API Request": {
+      "main": [
+        [
+          {
+            "node": "Process AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process AI Response": {
+      "main": [
+        [
+          {
+            "node": "Has Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Error": {
+      "main": [
+        [
+          {
+            "node": "Send Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "your-instance-id"
+  },
+  "id": "telegram-openrouter-bot-polling",
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "ai-bot",
+      "name": "AI Bot"
+    },
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "telegram-polling",
+      "name": "Telegram Polling"
+    }
+  ]
+}
